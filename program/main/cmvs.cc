@@ -14,15 +14,15 @@ int main(int argc, char* argv[]) {
          << "CPU should be the number of (virtual) CPUs or cores in your machine." << endl
          << "If you want more control of the program, look into the comments inside program/main/cmvs.cc" << endl;
     exit (1);
-  }  
-  
-  int maximage = 100;
-  if (3 <= argc)
-    maximage = atoi(argv[2]);
+  }
 
-  int CPU = 4;
+  int iNumForScore = 10;
+  if (3 <= argc)
+    iNumForScore = atoi(argv[2]);
+
+  int maximage = 100;
   if (4 <= argc)
-    CPU = atoi(argv[3]);
+    maximage = atoi(argv[3]);
 
   //----------------------------------------------------------------------
   // If you want more control of the program, you can also change the
@@ -41,14 +41,28 @@ int main(int argc, char* argv[]) {
   //
   // Intuitively, increasing these parameters lead to more images and
   // clusters in the output.
-  const float scoreRatioThreshold = 0.7f;
-  const float coverageThreshold = 0.7f;
-  
+  float scoreRatioThreshold = 0.9f;
+  if (5 <= argc)
+    scoreRatioThreshold = atof(argv[4]);
 
-  const int iNumForScore = 4;
+  float coverageThreshold = 0.7f;
+  if (6 <= argc)
+    coverageThreshold = atof(argv[5]);
+
+  int CPU = 4;
+  if (7 <= argc)
+    CPU = atoi(argv[6]);
+
+  bool removeImages = 0;
+  if (8 <= argc)
+    if(atoi(argv[7]) == 0)
+      removeImages = false;
+    else
+      removeImages = true;
+
   const int pnumThreshold = 0;
   CMVS::Cbundle bundle;
   bundle.run(argv[1], maximage, iNumForScore,
              scoreRatioThreshold, coverageThreshold,
-             pnumThreshold, CPU);
+             pnumThreshold, CPU, removeImages);
 }

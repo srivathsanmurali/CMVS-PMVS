@@ -26,7 +26,7 @@ int main(int argc, char* argv[]) {
   int csize = 2;
   if (4 <= argc)
     csize = atoi(argv[3]);
-  
+
   float threshold = 0.7;
   if (5 <= argc)
     threshold = atof(argv[4]);
@@ -34,25 +34,25 @@ int main(int argc, char* argv[]) {
   int wsize = 7;
   if (6 <= argc)
     wsize = atoi(argv[5]);
-  
+
   int minImageNum = 3;
   if (7 <= argc)
     minImageNum = atoi(argv[6]);
-  
+
   int CPU = 8;
   if (8 <= argc)
     CPU = atoi(argv[7]);
-  
+
   const int setEdge = 0;
   const int useBound = 0;
   const int useVisData = 1;
   const int sequence = -1;
-  
+
   ifstream ifstr;
   char ske[1024];
   sprintf(ske, "%sske.dat", argv[1]);
   ifstr.open(ske);
-  
+
   string header;
   int inum, cnum;
   ifstr >> header >> inum >> cnum;
@@ -88,10 +88,10 @@ int main(int argc, char* argv[]) {
           << "sequence " << sequence << endl
           << "maxAngle 10" << endl
           << "quad 2.0" << endl;
-    
+
     int timagenum, oimagenum;
     ifstr >> timagenum >> oimagenum;
-    
+
     vector<int> timages, oimages;
     timages.resize(timagenum);
     oimages.resize(oimagenum);
@@ -99,7 +99,7 @@ int main(int argc, char* argv[]) {
       ifstr >> timages[i];
     for (int i = 0; i < oimagenum; ++i)
       ifstr >> oimages[i];
-    
+
     ofstr << "timages " << timagenum << ' ';
     for (int i = 0; i < timagenum; ++i)
       ofstr << timages[i] << ' ';

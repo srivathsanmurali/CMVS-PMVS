@@ -30,6 +30,7 @@ Cbundle::Cbundle(void) {
   m_debug = 0;
   m_puf = NULL;
   m_ptree = NULL;
+  m_removeImages = false;
 }
 
 Cbundle::~Cbundle() {
@@ -38,12 +39,13 @@ Cbundle::~Cbundle() {
 void Cbundle::prep(const std::string prefix, const int imageThreshold,
                    const int tau, const float scoreRatioThreshold,
                    const float coverageThreshold,
-                   const int pnumThreshold, const int CPU) {
+                   const int pnumThreshold, const int CPU,
+                   const bool removeImages) {
   if (pnumThreshold != 0) {
     cerr << "Should use pnumThreshold = 0" << endl;
     exit (1);
   }
-  
+
   m_prefix = prefix;
   m_imageThreshold = imageThreshold;
   m_tau = tau;
@@ -51,12 +53,12 @@ void Cbundle::prep(const std::string prefix, const int imageThreshold,
   m_coverageThreshold = coverageThreshold;
   m_pnumThreshold = pnumThreshold;
   m_CPU = CPU;
-  
+  m_removeImages = removeImages;
   m_linkThreshold = 2.0f;
 
   m_dscale = 1 / 100.0f;
   m_dscale2 = 1.0f;
-  
+
   char buffer[1024];
   sprintf(buffer, "%sbundle.rd.out", prefix.c_str());
   cerr << "Reading bundle..." << flush;
@@ -70,7 +72,7 @@ void Cbundle::prep(const std::string prefix, const int imageThreshold,
   m_dlevel = 7;
   m_maxLevel = 12;
   m_pss.init(images, prefix, m_maxLevel + 1, 5, 0);
-  
+
   cerr << "Set widths/heights..." << flush;
   setWidthsHeightsLevels();
   cerr << "done" << flush;
@@ -89,9 +91,9 @@ void Cbundle::prep2(void) {
     slimNeighborsSetLinks();
     cerr << "done\t" << curTimer()/CLOCKS_PER_SEC << " secs" << endl;
   }
-  
+
   // Improve visibility by using texture analysis
-  startTimer();  
+  startTimer();
   cerr << "mergeSFM..." << flush;
   mergeSfMP();
   cerr << '\t' << curTimer()/CLOCKS_PER_SEC << " secs" << endl;
@@ -117,25 +119,26 @@ void Cbundle::prep2(void) {
   cerr << "slimNeighborsSetLinks..." << flush;
   slimNeighborsSetLinks();
   cerr << "done\t" << curTimer()/CLOCKS_PER_SEC << " secs" << endl;
-  
+
   // Init m_timages by mutually exclusive clustering
   setTimages();
-  m_oimages.resize((int)m_timages.size());  
+  m_oimages.resize((int)m_timages.size());
 }
 
 void Cbundle::run(const std::string prefix, const int imageThreshold,
                   const int tau, const float scoreRatioThreshold,
                   const float coverageThreshold,
-                  const int pnumThreshold, const int CPU) {
+                  const int pnumThreshold, const int CPU,
+                  const bool removeImages) {
   startTimer();
-  
+
   prep(prefix, imageThreshold, tau, scoreRatioThreshold,
-       coverageThreshold, pnumThreshold, CPU);
+       coverageThreshold, pnumThreshold, CPU, removeImages);
 
   cerr << '\t' << curTimer()/CLOCKS_PER_SEC << " secs" << endl;
 
   prep2();
-  
+
   // Assumed variables that must be set properly here
   cerr << "Adding images: " << endl;
   startTimer();
@@ -143,18 +146,18 @@ void Cbundle::run(const std::string prefix, const int imageThreshold,
   // Repeat until all the clusters become at most m_imageThreshold.
   while (1) {
     addImagesP();
-    
+
     int change = 0;
     vector<vector<int> > newtimages;
     cout << "Divide: " << flush;
     for (int i = 0; i < (int)m_timages.size(); ++i) {
-      if ((int)m_timages[i].size() <= m_imageThreshold) {        
+      if ((int)m_timages[i].size() <= m_imageThreshold) {
         newtimages.push_back(m_timages[i]);
         continue;
       }
       else {
         cout << i << ' ';
-        
+
         change = 1;
         // divide
         vector<vector<int> > vvi;
@@ -165,17 +168,17 @@ void Cbundle::run(const std::string prefix, const int imageThreshold,
     }
 
     cout << endl;
-    
+
     m_timages.swap(newtimages);
     if (change == 0)
       break;
   }
   cerr << "done\t" << curTimer()/CLOCKS_PER_SEC << " secs" << endl;
-  
+
   m_oimages.resize((int)m_timages.size());
 
   writeCameraCenters();
-  
+
   // Output results
   writeVis();
   writeGroups();
@@ -209,7 +212,7 @@ void Cbundle::slimNeighborsSetLinks(void) {
 #pragma omp parallel for
   for (int image = 0; image < m_cnum; ++image) {
     m_links[image].resize((int)m_neighbors[image].size());
-    
+
     for (int i = 0; i < (int)m_neighbors[image].size(); ++i)
       m_links[image][i] = computeLink(image, m_neighbors[image][i]);
 
@@ -229,7 +232,7 @@ void Cbundle::slimNeighborsSetLinks(void) {
       newneighbors.push_back((int)vv[i][1]);
       newlinks.push_back(-vv[i][0]);
     }
-    
+
     m_neighbors[image].swap(newneighbors);
     m_links[image].swap(newlinks);
   }
@@ -247,12 +250,12 @@ void Cbundle::setScoreThresholds(void) {
 void Cbundle::sRemoveImages(void) {
   m_removed.clear();
   m_removed.resize(m_cnum, 0);
-    
+
   m_allows.resize(m_cnum);
   for (int c = 0; c < m_cnum; ++c)
     m_allows[c] = (int)ceil((int)m_vpoints[c].size() *
                             (1.0f - m_coverageThreshold));
-  
+
   // Sort all the images in an increasing order of resolution
   vector<Vec2i> vvi;
   for (int c = 0; c < m_cnum; ++c) {
@@ -261,7 +264,7 @@ void Cbundle::sRemoveImages(void) {
     vvi.push_back(Vec2i(res, c));
   }
   sort(vvi.begin(), vvi.end(), Svec2cmp<int>());
-  
+
   const int tenth = max(1, m_cnum / 10);
   for (int i = 0; i < (int)vvi.size(); ++i) {
     if (i % tenth == 0)
@@ -270,7 +273,7 @@ void Cbundle::sRemoveImages(void) {
     checkImage(image);
   }
   cerr << endl;
-    
+
   cerr << "Kept: ";
   int kept = 0;
   for (int c = 0; c < m_cnum; ++c)
@@ -279,7 +282,7 @@ void Cbundle::sRemoveImages(void) {
       cerr << c << ' ';
     }
   cerr << endl << endl;
-  
+
   cerr << "Removed: ";
   for (int c = 0; c < m_cnum; ++c)
     if (m_removed[c]) {
@@ -316,7 +319,7 @@ void Cbundle::checkImage(const int image) {
   //  2: satisfy->unsatisfy
   m_statsT.resize((int)m_vpoints[image].size());
   m_jobs.clear();
-  
+
 #pragma omp parallel for
   for (int p = 0; p < (int)m_statsT.size(); ++p) {
     const int pid = m_vpoints[image][p];
@@ -339,10 +342,10 @@ void Cbundle::checkImage(const int image) {
           break;
         }
       }
-      
+
       if (valid == 1 && inside == 0)
         continue;
-      
+
       vector<int> newimages;
       setNewImages(pid, image, newimages);
       const float cscore = computeScore2(m_coords[pid], newimages);
@@ -350,12 +353,12 @@ void Cbundle::checkImage(const int image) {
         m_statsT[p] = 2;
     }
   }
-  
+
   // For each image, how many SFM points are removed if you remove
   // "image"
   vector<int> decrements;
   decrements.resize(m_cnum, 0);
-  
+
   // Look at points with m_stastT[p] = 2, to see if m_allows are still
   // above thresholds.
   for (int p = 0; p < (int)m_statsT.size(); ++p) {
@@ -369,7 +372,14 @@ void Cbundle::checkImage(const int image) {
   }
 
   // If m_allows can cover decrements, go ahead.
-  int rflag = 1;
+  /* Orig
+    int rflag = 1;
+    I am forcing the system not to remove images by setting it 0
+  */
+  int rflag = 0;
+  if(m_removeImages)
+   rflag = 1;
+
   for (int c = 0; c < m_cnum; ++c)
     if (m_allows[c] < decrements[c]) {
       rflag = 0;
@@ -419,20 +429,20 @@ void Cbundle::setNeighbors(void) {
   for (int image = 0; image < m_cnum; ++image) {
     vector<int> narray;
     narray.resize(m_cnum, 0);
-    
+
     for (int p = 0; p < (int)m_visibles.size(); ++p) {
       if (!binary_search(m_visibles[p].begin(), m_visibles[p].end(),
                          image))
         continue;
-      
+
       for (int i = 0; i < (int)m_visibles[p].size(); ++i)
         narray[m_visibles[p][i]] = 1;
     }
-    
+
     for (int i = 0; i < m_cnum; ++i)
       if (narray[i] && i != image)
         m_neighbors[image].push_back(i);
-  } 
+  }
 }
 
 void Cbundle::setTimages(void) {
@@ -447,7 +457,7 @@ void Cbundle::setTimages(void) {
     m_timages.push_back(lhs);
   else
     divideImages(lhs, m_timages);
-  
+
   cerr << endl << "Cluster sizes: " << endl;
   for (int i = 0; i < (int)m_timages.size(); ++i)
     cerr << (int)m_timages[i].size() << ' ';
@@ -464,7 +474,7 @@ void Cbundle::divideImages(const std::vector<int>& lhs,
   vector<int>& vitmp = candidates.back();
   for (int i = 0; i < (int)lhs.size(); ++i)
     vitmp.push_back(lhs[i]);
-  
+
   // Iterate
   while (1) {
     if (candidates.empty())
@@ -489,9 +499,9 @@ void Cbundle::divideImages(const std::vector<int>& lhs,
         // Check if cand[i] and cand[j] are connected
         const int cid0 = cand[i];
         const int cid1 = cand[j];
-        vector<int>::const_iterator nite = 
+        vector<int>::const_iterator nite =
           find(m_neighbors[cid0].begin(), m_neighbors[cid0].end(), cid1);
-        
+
         if (nite != m_neighbors[cid0].end()) {
           adjncy.push_back(j);
           const int offset = nite - m_neighbors[cid0].begin();
@@ -504,7 +514,7 @@ void Cbundle::divideImages(const std::vector<int>& lhs,
     xadj.push_back((int)adjncy.size());
 
     Cgraclus::runE(xadj, adjncy, adjwgt, nparts, cutType, part);
-    
+
     // Divide into 2 groups
     vector<int> cand1, cand2;
     for (int i = 0; i < (int)part.size(); ++i) {
@@ -513,7 +523,7 @@ void Cbundle::divideImages(const std::vector<int>& lhs,
       else
         cand2.push_back(cand[i]);
     }
-    
+
     if (cand1.empty() || cand2.empty()) {
       cerr << "Error. Normalized cuts produced an empty cluster: "
            << (int)part.size() << " -> "
@@ -521,7 +531,7 @@ void Cbundle::divideImages(const std::vector<int>& lhs,
            << (int)cand2.size() << endl;
       exit (1);
     }
-    
+
     if ((int)cand1.size() <= m_imageThreshold * iratio)
       rhs.push_back(cand1);
     else {
@@ -583,7 +593,7 @@ void Cbundle::readBundle(const std::string file) {
     ifstr >> coord[0] >> coord[1] >> coord[2]
           >> color >> num;
     coord[3] = 1.0f;
-    
+
     vector<int> visibles;
     for (int i = 0; i < num; ++i) {
       int itmp;      ifstr >> itmp;
@@ -608,11 +618,11 @@ void Cbundle::readBundle(const std::string file) {
       continue;
 
     sort(visibles.begin(), visibles.end());
-    
+
     for (int i = 0; i < (int)visibles.size(); ++i) {
        m_vpoints[visibles[i]].push_back(m_pnum);
     }
-    
+
     m_visibles.push_back(visibles);
     m_coords.push_back(coord);
     m_colors.push_back(color);
@@ -620,7 +630,7 @@ void Cbundle::readBundle(const std::string file) {
   }
   ifstr.close();
   setNeighbors();
-  
+
   cerr << endl << m_cnum << " cameras -- " << m_pnum << " points" << flush;
 }
 
@@ -642,7 +652,7 @@ void Cbundle::findPNeighbors(sfcnn<const float*, 3, float>& tree,
       break;
     if (k == (int)m_coords.size())
       break;
-    
+
     k = min((int)m_coords.size(), k * 2);
   }
 
@@ -655,7 +665,7 @@ void Cbundle::findPNeighbors(sfcnn<const float*, 3, float>& tree,
       m_minScales[ids[i]] * m_minScales[ids[i]];
     if (thresh2 < dists[i])
       continue;
-    
+
     if (ids[i] != (unsigned int)pid)
       pneighbors.push_back(ids[i]);
   }
@@ -694,7 +704,7 @@ void Cbundle::mergeSfMPThread(void) {
       mymerge(visibles, m_neighbors[imagetmp], vitmp);
       vitmp.swap(visibles);
     }
-    
+
     vector<char> visflag(psize, 0);
     // test visibility
     for (int i = 0; i < psize; ++i) {
@@ -702,7 +712,7 @@ void Cbundle::mergeSfMPThread(void) {
       if (my_isIntersect(visibles, m_visibles[pid2]))
         visflag[i] = 1;
     }
-    
+
     // Now lock and try to register
     mtx_lock(&m_lock);
     // If the main one is removed, over... waste.
@@ -738,7 +748,7 @@ void Cbundle::mergeSfMP(void) {
       m_minScales[p] = min(m_minScales[p], stmp);
     }
   }
-  
+
   m_puf = new disjoint_sets_with_storage<>(cpnum);
   for (int p = 0; p < cpnum; ++p)
     m_puf->make_set(p);
@@ -751,7 +761,7 @@ void Cbundle::mergeSfMP(void) {
       ppoints[i] = &(m_coords[i][0]);
     m_ptree =
       new sfcnn<const float*, 3, float>(&ppoints[0], (int)ppoints.size());
-    
+
     m_merged.resize((int)m_coords.size(), 0);
     m_jobs.clear();
     vector<int> order;
@@ -759,10 +769,10 @@ void Cbundle::mergeSfMP(void) {
     for (int p = 0; p < cpnum; ++p)
       order[p] = p;
     random_shuffle(order.begin(), order.end());
-    
+
     for (int p = 0; p < cpnum; ++p)
       m_jobs.push_back(order[p]);
-    
+
     m_count = 0;
     vector<thrd_t> threads(m_CPU);
     for (int c = 0; c < m_CPU; ++c)
@@ -784,7 +794,7 @@ void Cbundle::mergeSfMP(void) {
       }
     }
   }
-  
+
   // Based on m_puf, reset m_coords, m_coords, m_visibles, m_vpoints
   cerr << "resetPoints..." << flush;
   resetPoints();
@@ -794,7 +804,7 @@ void Cbundle::mergeSfMP(void) {
   m_puf = NULL;
   delete m_ptree;
   m_ptree = NULL;
-   
+
   const int npnum = (int)m_coords.size();
   cerr << "Rep counts: " << cpnum << " -> " << npnum << "  " << flush;
 }
@@ -816,13 +826,13 @@ void Cbundle::resetPoints(void) {
     if (mthreshold <= counts[p])
       vv2.push_back(Vec2i(smallestids[p], p));
   sort(vv2.begin(), vv2.end(), Svec2cmp<int>());
-  
+
   vector<int> newpids;
   newpids.resize((int)m_coords.size(), -1);
   int newpnum = (int)vv2.size();
   for (int i = 0; i < newpnum; ++i)
     newpids[vv2[i][1]] = i;
-  
+
   vector<Vec4f> newcoords;  newcoords.resize(newpnum);
   vector<vector<int> > newvisibles;  newvisibles.resize(newpnum);
 
@@ -830,24 +840,24 @@ void Cbundle::resetPoints(void) {
     const int ptmp = m_puf->find_set(p);
     if (counts[ptmp] < mthreshold)
       continue;
-    
+
     const int newpid = newpids[ptmp];
     newcoords[newpid] += m_coords[p];
     vector<int> vitmp;
     mymerge(newvisibles[newpid], m_visibles[p], vitmp);
     vitmp.swap(newvisibles[newpid]);
-  }  
-  
+  }
+
   for (int i = 0; i < newpnum; ++i)
     newcoords[i] = newcoords[i] / newcoords[i][3];
-  
+
   // Update m_vpoints
   m_coords.swap(newcoords);
   m_visibles.swap(newvisibles);
-  
+
   for (int c = 0; c < m_cnum; ++c)
-    m_vpoints[c].clear();  
-  
+    m_vpoints[c].clear();
+
   for (int p = 0; p < (int)m_coords.size(); ++p) {
     for (int i = 0; i < (int)m_visibles[p].size(); ++i) {
       const int itmp = m_visibles[p][i];
@@ -867,7 +877,7 @@ void Cbundle::setScoresClusters(void) {
     // cluster, not satisfied
     if (m_sfms2[p].m_satisfied == 0)
       continue;
-    
+
     m_sfms2[p].m_satisfied = 2;
     setCluster(p);
   }
@@ -882,7 +892,7 @@ void Cbundle::setCluster(const int p) {
     set_intersection(m_timages[c].begin(), m_timages[c].end(),
                      m_visibles[p].begin(), m_visibles[p].end(),
                      back_inserter(vitmp));
-    
+
     const float stmp = computeScore2(m_coords[p], vitmp);
     if (m_sfms2[p].m_score < stmp) {
       m_sfms2[p].m_cluster = c;
@@ -919,7 +929,7 @@ void Cbundle::setCluster(const int p) {
     m_sfms2[p].m_satisfied = 1;
 
     //  update m_lacks
-    mtx_lock(&m_lock);    
+    mtx_lock(&m_lock);
     for (int i = 0; i < (int)m_visibles[p].size(); ++i) {
       const int image = m_visibles[p][i];
       --m_lacks[image];
@@ -967,16 +977,16 @@ void Cbundle::addImagesP(void) {
 
   // Compute best score given all the images. Upper bound on the score
   setScoresClusters();
-  
+
   // Add images to clusters to make m_lacks at most 0 for all the
   // images. In practice, for each cluster, identify corresponding sfm
   // points that have not been satisfied. These points compute gains.
-  
+
   // set m_adds for each sfm point, and add images
 
   m_addnums.clear();
   m_addnums.resize((int)m_timages.size(), 0);
-  
+
   while (1) {
     const int totalnum = addImages();
     // Very end
@@ -993,14 +1003,14 @@ void Cbundle::addImagesP(void) {
     if (divide) {
       break;
     }
-    
+
     setClusters();
   }
 
   for (int i = 0; i < (int)m_addnums.size(); ++i)
     cerr << m_addnums[i] << ' ';
   cerr << endl;
-  
+
   int totalnum = 0;
   for (int c = 0; c < (int)m_timages.size(); ++c)
     totalnum += (int)m_timages[c].size();
@@ -1008,7 +1018,7 @@ void Cbundle::addImagesP(void) {
   for (int c = 0; c < m_cnum; ++c)
     if (m_removed[c] == 0)
       ++beforenum;
-  
+
   cerr << "Image nums: "
        << m_cnum << " -> " << beforenum <<  " -> " << totalnum << endl;
 }
@@ -1016,7 +1026,7 @@ void Cbundle::addImagesP(void) {
 int Cbundle::addImages(void) {
   m_thread = 0;
   m_jobs.clear();
-  
+
   // we think about sfm points that belong to images that have not been satisfied
   vector<char> flags;
   flags.resize((int)m_coords.size(), 0);
@@ -1037,7 +1047,7 @@ int Cbundle::addImages(void) {
     if (flags[p] == 0)
       continue;
     m_sfms2[p].m_adds.clear();
-    
+
     const int cluster = m_sfms2[p].m_cluster;
     // Try to add an image to m_timages[cluster]
     vector<int> cimages;
@@ -1045,13 +1055,13 @@ int Cbundle::addImages(void) {
                      m_visibles[p].begin(), m_visibles[p].end(),
                      back_inserter(cimages));
     sort(cimages.begin(), cimages.end());
-    
+
     for (int i = 0; i < (int)m_visibles[p].size(); ++i) {
       const int image = m_visibles[p][i];
-      
+
       if (binary_search(cimages.begin(), cimages.end(), image))
         continue;
-      
+
       vector<int> vitmp = cimages;
       vitmp.push_back(image);
       const float newscore = computeScore2(m_coords[p], vitmp);
@@ -1063,7 +1073,7 @@ int Cbundle::addImages(void) {
                                        m_sfms2[p].m_scoreThreshold));
     }
   }
-  
+
   // Accumulate information from SfM points. For each cluster.
   // For each cluster, for each image, sum of gains.
   vector<map<int, float> > cands;
@@ -1072,9 +1082,9 @@ int Cbundle::addImages(void) {
   for (int p = 0; p < (int)m_sfms2.size(); ++p) {
     if (flags[p] == 0)
       continue;
-    
+
     const int cluster = m_sfms2[p].m_cluster;
-    
+
     for (int i = 0; i < (int)m_sfms2[p].m_adds.size(); ++i) {
       Sadd& stmp = m_sfms2[p].m_adds[i];
       cands[cluster][stmp.m_image] += stmp.m_gain;
@@ -1091,7 +1101,7 @@ int Cbundle::addImagesSub(const std::vector<std::map<int, float> >& cands) {
   for (int i = 0; i < (int)m_timages.size(); ++i) {
     map<int, float>::const_iterator mbegin = cands[i].begin();
     map<int, float>::const_iterator mend = cands[i].end();
-    
+
     while (mbegin != mend) {
       cands2.push_back(Vec3f(-mbegin->second, i, mbegin->first));
       ++mbegin;
@@ -1102,7 +1112,7 @@ int Cbundle::addImagesSub(const std::vector<std::map<int, float> >& cands) {
     return 0;
 
   sort(cands2.begin(), cands2.end(), Svec3cmp<float>());
-  
+
   vector<char> blocked;
   blocked.resize(m_cnum, 0);
   vector<int> addnum;
@@ -1119,10 +1129,10 @@ int Cbundle::addImagesSub(const std::vector<std::map<int, float> >& cands) {
     const float gain = -cands2[i][0];
     if (gain < gainThreshold)
       break;
-    
+
     const int cluster = (int)cands2[i][1];
     const int image = (int)cands2[i][2];
-    
+
     if (blocked[image])
       continue;
 
@@ -1137,10 +1147,10 @@ int Cbundle::addImagesSub(const std::vector<std::map<int, float> >& cands) {
     // m_score, m_cluster, m_satisfied, m_lacks are updated in
     // setClusters.  So, no need to update anything.
   }
-  
+
   for (int i = 0; i < (int)m_timages.size(); ++i)
     sort(m_timages[i].begin(), m_timages[i].end());
-  
+
   return accumulate(addnum.begin(), addnum.end(), 0);
 }
 
@@ -1161,7 +1171,7 @@ int Cbundle::my_isIntersect(const std::vector<int>& lhs,
 
   while (1) {
     if (b0 == e0)
-      return 0;  
+      return 0;
     if (b1 == e1)
       return 0;
 
@@ -1232,7 +1242,7 @@ void Cbundle::setWidthsHeightsLevels(void) {
   }
 }
 
- 
+
 float Cbundle::computeScore2(const Vec4f& coord,
                              const std::vector<int>& images) const {
   vector<int> uimages;
@@ -1246,14 +1256,14 @@ float Cbundle::computeScore2(const Vec4f& coord,
   uimages.clear();
   if (inum < 2)
     return -1.0f;
-  
+
   vector<Vec4f> rays;    rays.resize(inum);
   vector<float> scales;  scales.resize(inum);
-  
+
   for (int r = 0; r < inum; ++r) {
     rays[r] = m_pss.m_photos[images[r]].m_center - coord;
     unitize(rays[r]);
-    
+
     scales[r] = 1.0f / m_pss.m_photos[images[r]].getScale(coord, 0);
   }
 
@@ -1292,11 +1302,11 @@ float Cbundle::computeScore2(const Vec4f& coord,
         ansid = j;
       }
     }
-    
+
     if (ansid == -1) {
       cerr << "Impossible 2 in compureScore" << endl;      exit (1);
     }
-    
+
     inout[ansid] = 0;
     uimages.push_back(ansid);
     bestscore += ansscore;
@@ -1304,7 +1314,7 @@ float Cbundle::computeScore2(const Vec4f& coord,
 
   for (int i = 0; i < (int)uimages.size(); ++i)
     uimages[i] = images[uimages[i]];
-  
+
   return bestscore;
 }
 
@@ -1315,14 +1325,14 @@ float Cbundle::computeScore2(const Vec4f& coord,
   const int inum = (int)images.size();
   if (inum < 2)
     return -1.0f;
-  
+
   vector<Vec4f> rays;    rays.resize(inum);
   vector<float> scales;  scales.resize(inum);
-  
+
   for (int r = 0; r < inum; ++r) {
     rays[r] = m_pss.m_photos[images[r]].m_center - coord;
     unitize(rays[r]);
-    
+
     scales[r] = 1.0f / m_pss.m_photos[images[r]].getScale(coord, 0);
   }
 
@@ -1349,11 +1359,11 @@ float Cbundle::computeScore2(const Vec4f& coord,
         ansid = j;
       }
     }
-    
+
     if (ansid == -1) {
       cerr << "Impossible 2 in compureScore" << endl;      exit (1);
     }
-    
+
     inout[ansid] = 0;
     uimages.push_back(ansid);
     bestscore += ansscore;
@@ -1365,14 +1375,14 @@ void Cbundle::writeVis(void) {
   ofstream ofstr;
   char buffer[1024];
   sprintf(buffer, "%svis.dat", m_prefix.c_str());
-  
+
   ofstr.open(buffer);
   ofstr << "VISDATA" << endl;
   ofstr << m_cnum << endl;
 
   int numer = 0;
   int denom = 0;
-  
+
   for (int c = 0; c < m_cnum; ++c) {
     if (m_removed[c])
       ofstr << c << ' ' << 0 << endl;
@@ -1390,14 +1400,14 @@ void Cbundle::writeVis(void) {
 
 
   cerr << numer / (float)denom << " images in vis on the average" << endl;
-  
+
 }
 
 void Cbundle::writeCameraCenters(void) {
   for (int i = 0; i < (int)m_timages.size(); ++i) {
     char buffer[1024];
     sprintf(buffer, "%scenters-%04d.ply", m_prefix.c_str(), i);
-    
+
     ofstream ofstr;
     ofstr.open(buffer);
     ofstr << "ply" << endl
@@ -1421,7 +1431,7 @@ void Cbundle::writeCameraCenters(void) {
     sprintf(buffer, "%scenters-all.ply", m_prefix.c_str());
     ofstream ofstr;
     ofstr.open(buffer);
-    
+
     ofstr << "ply" << endl
           << "format ascii 1.0" << endl
           << "element vertex " << m_cnum << endl
@@ -1436,7 +1446,7 @@ void Cbundle::writeCameraCenters(void) {
       ofstr << m_pss.m_photos[c].m_center[0] << ' '
             << m_pss.m_photos[c].m_center[1] << ' '
             << m_pss.m_photos[c].m_center[2] << ' ';
-      
+
       if (m_removed[c])
         ofstr << "0 255 0" << endl;
       else
@@ -1453,7 +1463,7 @@ void Cbundle::writeGroups(void) {
   ofstr.open(buffer);
   ofstr << "SKE" << endl
         << m_cnum << ' ' << (int)m_timages.size() << endl;
-  
+
   for (int c = 0; c < (int)m_timages.size(); ++c) {
     ofstr << (int)m_timages[c].size() << ' ' << (int)m_oimages[c].size() << endl;
 
@@ -1467,10 +1477,10 @@ void Cbundle::writeGroups(void) {
 }
 
 void Cbundle::startTimer(void) {
-  time(&m_tv); 
+  time(&m_tv);
 }
 
 time_t Cbundle::curTimer(void) {
-  time(&m_curtime); 
+  time(&m_curtime);
   return m_tv - m_curtime;
 }
